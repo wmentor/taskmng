@@ -20,18 +20,6 @@ const (
 	defaultWorkenPoolSize = 8
 )
 
-type CallbackFunc func(string)
-
-type EventPublisher interface {
-	PublishEvent(eventKey interface{}, msg string)
-}
-
-type Option func(*TaskManager) error
-
-type Task interface {
-	Exec(context.Context, EventPublisher) error
-}
-
 type TaskManager struct {
 	ctx             context.Context
 	cancel          context.CancelFunc
@@ -74,50 +62,6 @@ func New(opts ...Option) (*TaskManager, error) {
 	return manager, nil
 }
 
-func WithContext(ctx context.Context) Option {
-	return func(manager *TaskManager) error {
-		if manager.ctx == nil || manager.ctx == context.Context(nil) {
-			manager.ctx, manager.cancel = context.WithCancel(ctx)
-			return nil
-		}
-		return errors.WithMessage(ErrInvalidParam, "context already set")
-	}
-}
-
-func WithTaskQueueSize(size int) Option {
-	return func(manager *TaskManager) error {
-		if size < 1 {
-			return errors.WithMessage(ErrInvalidParam, "invalid task queue size")
-		}
-		manager.taskQueueSize = size
-		return nil
-	}
-}
-
-func WithWorkerPoolSize(size int) Option {
-	return func(manager *TaskManager) error {
-		if size < 1 {
-			return errors.WithMessage(ErrInvalidParam, "invalid worker pool size")
-		}
-		manager.workerPoolSize = size
-		return nil
-	}
-}
-
-func WithErrorCallback(callback func(string)) Option {
-	return func(manager *TaskManager) error {
-		manager.callbackStorage.RegCallback(errorCallbackKey, callback)
-		return nil
-	}
-}
-
-func WithEventCallback(eventKey interface{}, callback CallbackFunc) Option {
-	return func(manager *TaskManager) error {
-		manager.callbackStorage.RegCallback(eventKey, callback)
-		return nil
-	}
-}
-
 func (manager *TaskManager) worker() {
 	for task := range manager.inputTasks {
 		manager.processTask(task)
@@ -127,12 +71,12 @@ func (manager *TaskManager) worker() {
 func (manager *TaskManager) processTask(task Task) {
 	defer func() {
 		if r := recover(); r != nil {
-			manager.callbackStorage.PublishEvent(errorCallbackKey, fmt.Sprintf("fatal error: %v", r))
+			manager.callbackStorage.PublishEvent(manager.ctx, errorCallbackKey, fmt.Sprintf("fatal error: %v", r))
 		}
 	}()
 
 	if err := task.Exec(manager.ctx, manager.callbackStorage); err != nil {
-		manager.callbackStorage.PublishEvent(errorCallbackKey, err.Error())
+		manager.callbackStorage.PublishEvent(manager.ctx, errorCallbackKey, err.Error())
 	}
 }
 
